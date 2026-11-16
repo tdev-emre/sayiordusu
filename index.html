@@ -250,7 +250,7 @@ let S;
 function newRun(level) {
   S = {
     L: level, state: 'play', t: 0, dist: 0, speed: 10,
-    n: 3 + (level - 1) * 3 + META.up.men * 2, px: 0, tx: 0, dmg: 1 + META.up.dmg * 0.1, rate: 2.5 * (1 + META.up.rate * 0.06), weapon: 'rifle', critCh: 0.1 + META.up.crit * 0.02, fireT: 0, volley: 0, muzzleT: 0,
+    n: 10 + (level - 1) * 4 + META.up.men * 2, px: 0, tx: 0, dmg: 1 + META.up.dmg * 0.1, rate: 2.5 * (1 + META.up.rate * 0.06), weapon: 'rifle', critCh: 0.1 + META.up.crit * 0.02, fireT: 0, volley: 0, muzzleT: 0,
     events: buildLevel(level), evI: 0, total: 0,
     zombies: [], groups: [], gates: [], crates: [], bullets: [], parts: [], rings: [], texts: [], splats: [], coinFx: [], cracks: [], booms: [], boss: null,
     shake: 0, contactT: 0, lost: 0, kills: 0, coins: 0, coinsShown: 0, coinPop: 0,
@@ -280,8 +280,8 @@ function buildLevel(L) {
       if (Math.random() < 0.5) [a, b] = [b, a];
       ev.push({ at, t: 'gate', a, b });
     } else if (m === 1) {
-      if (L >= 3 && i > 1 && Math.random() < 0.3) ev.push({ at, t: 'runners', c: 14 + L * 2 });
-      else ev.push({ at, t: 'horde', i, c: Math.min(170, Math.round(20 + L * 11 + i * 2.5)), hp: 0.5 + L * 0.2 });
+      if (L >= 3 && i > 1 && Math.random() < 0.3) ev.push({ at, t: 'runners', c: 24 + L * 2 });
+      else ev.push({ at, t: 'horde', i, c: Math.min(240, Math.round(42 + L * 8 + i * 3)), hp: 0.4 + L * 0.15 });
     } else if (m === 2) {
       ev.push({ at, t: 'crate', two: Math.random() < 0.45, hp: 18 + L * 14 + i * 3, z: Math.random() < 0.5 ? 18 + L * 4 : 0 });
     } else {
@@ -306,9 +306,11 @@ const SHIRTS = ['#6b2b2b', '#4f3a2a', '#3d4656', '#5a2e4a', '#2f4a3a'];
 // Sıkı blok halinde sürü: satır satır dizilir, birlikte yürür ve birlikte döner
 function spawnHorde(count, hp, cx, z, maxCols = 16, lock = false, kind = 'mix') {
   const L = S.L, run = kind === 'run';
-  const cols = clamp(Math.round(Math.sqrt(count * 2.2)), 4, maxCols);
-  const sx = run ? 0.8 : 0.5, sz = run ? 0.9 : 0.55, half = (cols - 1) / 2 * sx;
-  const lim = RW - 0.35 - half;
+  // kilitli olmayan büyük sürüler yolu bir kenardan öbürüne kaplar
+  const full = run ? 12 : 21, wall = !lock && count >= full * 2;
+  const cols = wall ? full : clamp(Math.round(Math.sqrt(count * 2.2)), 4, maxCols);
+  const sx = wall ? (2 * RW - 0.9) / (full - 1) : run ? 0.8 : 0.5, sz = run ? 0.9 : 0.5, half = (cols - 1) / 2 * sx;
+  const lim = Math.max(0, RW - 0.35 - half);
   const g = { cx: cx == null ? rnd(-lim, lim) : clamp(cx, -lim, lim), lim, sp: run ? rnd(7, 8.5) : rnd(2.3, 3), total: count, left: count, touched: false, lock };
   S.groups.push(g);
   const mid = Math.floor(count / 2);
@@ -464,6 +466,8 @@ function killSoldiers(k, x, z) {
   SFX.hurt();
 }
 
+const zWeight = zb => zb.type === 'g' ? 6 + S.L : zb.type === 'x' ? 4 + S.L : 1;
+
 function zombieDie(zb) {
   zb.dead = true;
   const zt = zb.type || 'n';
@@ -563,7 +567,9 @@ function update(dt) {
     // sıralar dalga dalga hızlanıp yavaşlar, her zombi kendi gecikmesiyle yön değiştirir
     zb.z -= mv + zb.g.sp * (1 + 0.32 * Math.sin(S.t * 1.15 + zb.wph)) * dt; zb.ph += dt * 9; zb.flash = Math.max(0, zb.flash - dt * 6);
     zb.kb = Math.max(0, zb.kb - dt * 3);
-    zb.x += (zb.g.cx + zb.ox + Math.sin(S.t * 1.6 + zb.sph) * 0.14 - zb.x) * Math.min(1, dt * zb.lag);
+    let hx = zb.g.cx + zb.ox, lg = zb.lag;
+    if (!zb.g.lock && zb.z < 16) { const t = clamp((16 - zb.z) / 11, 0, 1), e = t * t * (3 - 2 * t); hx += (S.px + zb.ox / RW * (R + 0.9) - hx) * e; lg = Math.max(lg, 2 + e * 5); }
+    zb.x += (hx + Math.sin(S.t * 1.6 + zb.sph) * 0.14 - zb.x) * Math.min(1, dt * lg);
     if (zb.fuse !== undefined && !zb.dead && (zb.fuse -= dt) <= 0) zombieDie(zb);
   }
   const B = S.boss;
@@ -664,9 +670,9 @@ function update(dt) {
 
   // temas: zombiler
   for (const zb of S.zombies) {
-    if (zb.z <= SQ_Z + 0.7 && zb.z > SQ_Z - 1.6 && Math.abs(zb.x - S.px) < R) {
+    if (zb.z <= SQ_Z + 0.7 && zb.z > SQ_Z - 1.6 && (!zb.g.lock || Math.abs(zb.x - S.px) < R)) {
       zb.dead = true; zb.g.left--; zb.g.touched = true;
-      const kk = zb.type === 'g' ? 6 + S.L : zb.type === 'x' ? 4 + S.L : 1;
+      const kk = zWeight(zb);
       killSoldiers(kk, zb.x, SQ_Z); addShake(kk > 1 ? 9 : 3);
       if (kk > 1) { const q = P(zb.x, SQ_Z); explode(q.x, q.y - 20, 30, 1); SFX.boomS(); floatText(q.x, q.y - 70, '-' + kk, '#ff6b5e', 34); }
     } else if (zb.z < -3) { zb.dead = true; zb.g.left--; zb.g.touched = true; }
@@ -1605,6 +1611,24 @@ function drawBanners() {
   }
 }
 
+// her sürünün üstünde kalan gücü: orduya değerse bu kadar asker götürür
+function drawHordeBadges() {
+  if (S.state !== 'play') return;
+  for (const g of S.groups) { g.bw = 0; g.bx = 0; g.bz = 0; g.bn = 0; g.bf = 1e9; }
+  for (const zb of S.zombies) { const g = zb.g; g.bw += zWeight(zb); g.bx += zb.x; g.bz += zb.z; g.bn++; if (zb.z < g.bf) g.bf = zb.z; }
+  for (const g of S.groups) {
+    if (g.bn < 3 || g.bf > 80 || g.bf < 3) continue;
+    const p = P(g.bx / g.bn, g.bz / g.bn), sz = clamp(p.u * 0.85, 11, 20), label = String(g.bw);
+    const lose = g.bw >= S.n, y = p.y - p.u * 2.1 - sz;
+    ctx.font = `${sz}px ${FONT}`; const w = Math.max(sz * 2, ctx.measureText(label).width + sz * 0.9);
+    ctx.globalAlpha = clamp((80 - g.bf) / 12, 0, 1);
+    ctx.fillStyle = lose ? '#e8433a' : '#8f1f19'; roundRect(p.x - w / 2, y - sz * 0.75, w, sz * 1.5, sz * 0.45); ctx.fill();
+    ctx.strokeStyle = lose ? '#ffffff' : 'rgba(255,255,255,.55)'; ctx.lineWidth = 2; ctx.stroke();
+    text(label, p.x, y + 1, sz * 0.95, '#fff');
+    ctx.globalAlpha = 1;
+  }
+}
+
 function render() {
   const T = TH();
   const sh = S.shake, sx = sh > 0 ? rnd(-sh, sh) : 0, sy = sh > 0 ? rnd(-sh, sh) : 0;
@@ -1632,6 +1656,7 @@ function render() {
   for (let i = 0; i < vn; i++) { const f = FORM[i]; list.push({ z: SQ_Z + f.dz, f: () => drawSoldier(solX(i), solZ(i), S.t, i) }); }
   list.sort((a, b) => b.z - a.z);
   for (const it of list) if (it.z < 110) it.f();
+  drawHordeBadges();
   drawBullets();
   drawFx();
   drawAmbient();
