@@ -96,8 +96,8 @@ button.alt:active{box-shadow:0 2px 0 #232e40}
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const stage = document.getElementById('stage'), wrap = document.getElementById('wrap');
 const W = 540, H = 960, CX = W / 2;
-const HOR = 170, D = 8, K = (820 - HOR) * D, KX = 48 * D;
-const RW = 5, Z0 = 100, RANGE = 62, SQ_Z = 1.0;
+const HOR = 170, D = 8, K = (820 - HOR) * D, KX = 44 * D;
+const RW = 6.2, LANE = 3.4, Z0 = 100, RANGE = 62, SQ_Z = 1.0;
 const FONT = '"Bungee","Arial Black",Impact,sans-serif';
 const REDUCED = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 let cssScale = 1;
@@ -143,13 +143,15 @@ try { best = +localStorage.getItem('sayiOrdusuBest') || 1; } catch (e) {}
 const canVib = typeof navigator.vibrate === 'function' && (navigator.maxTouchPoints > 0 || !!window.__forceVib);
 let vibOn = true, vibUntil = 0, vibPri = 0;
 try { vibOn = localStorage.getItem('sayiOrdusuVib') !== '0'; } catch (e) {}
-function buzz(pat, pri = 1) {
+// kind: 'success' | 'warning' | 'error' | 'select' — yerel uygulamada (iOS) daha uygun titreşim türünü seçer
+function buzz(pat, pri = 1, kind) {
   if (!canVib || !vibOn) return;
   const n = performance.now();
   if (n < vibUntil && pri <= vibPri) return; // süren güçlü titreşimi zayıfı kesmesin
   const dur = typeof pat === 'number' ? pat : pat.reduce((a, b) => a + b, 0);
-  try { if (navigator.vibrate(pat)) { vibUntil = n + dur; vibPri = pri; } } catch (e) {}
+  try { if (window.__haptic ? window.__haptic(pat, kind) : navigator.vibrate(pat)) { vibUntil = n + dur; vibPri = pri; } } catch (e) {}
 }
+let lastTickBuzz = 0;
 
 // ---------- ses ----------
 let AC = null, master = null, muted = false;
@@ -218,9 +220,9 @@ const SFX = {
     }
   },
   coin() { const n = performance.now(); if (n - lastCoin < 45) return; lastCoin = n; tone(1320, 0.05, 'square', 0.025); tone(1760, 0.07, 'square', 0.025, 1, 0.04); },
-  tick() { const n = performance.now(); if (n - lastTick < 70) return; lastTick = n; tone(880, 0.04, 'square', 0.03); },
-  gateGood() { buzz(18); [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.16, 'square', 0.05, 1, i * 0.06)); },
-  gateBad() { buzz(60, 2); tone(300, 0.35, 'sawtooth', 0.06, 0.4); },
+  tick() { const n = performance.now(); if (n - lastTick < 70) return; lastTick = n; tone(880, 0.04, 'square', 0.03); if (n - lastTickBuzz > 160) { lastTickBuzz = n; buzz(8, 0, 'select'); } },
+  gateGood() { buzz(18, 1, 'success'); [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.16, 'square', 0.05, 1, i * 0.06)); },
+  gateBad() { buzz(60, 2, 'error'); tone(300, 0.35, 'sawtooth', 0.06, 0.4); },
   crate() { buzz(28, 2); noise(0.25, 0.25, 600); tone(110, 0.2, 'sine', 0.2, 0.5); [784, 988, 1175, 1568].forEach((f, i) => tone(f, 0.12, 'triangle', 0.06, 1, 0.08 + i * 0.05)); },
   hurt() { buzz(35); tone(160, 0.12, 'sawtooth', 0.05, 0.6); },
   praise() { buzz(20); [523, 784, 1047, 1319].forEach((f, i) => tone(f, 0.25, 'triangle', 0.06, 1, i * 0.07)); },
@@ -246,9 +248,9 @@ let S;
 function newRun(level) {
   S = {
     L: level, state: 'play', t: 0, dist: 0, speed: 10,
-    n: 10 + (level - 1) * 4 + META.up.men * 2, px: 0, tx: 0, dmg: 1 + META.up.dmg * 0.1, rate: 2.5 * (1 + META.up.rate * 0.06), weapon: 'rifle', critCh: 0.1 + META.up.crit * 0.02, fireT: 0, volley: 0, muzzleT: 0,
+    n: 10 + (level - 1) * 3 + META.up.men, px: 0, tx: 0, dmg: 1 + META.up.dmg * 0.06, rate: 2.5 * (1 + META.up.rate * 0.04), weapon: 'rifle', critCh: 0.1 + META.up.crit * 0.015, fireT: 0, volley: 0, muzzleT: 0,
     events: buildLevel(level), evI: 0, total: 0,
-    zombies: [], groups: [], gates: [], crates: [], bullets: [], parts: [], rings: [], texts: [], splats: [], coinFx: [], cracks: [], booms: [], boss: null,
+    zombies: [], groups: [], gates: [], crates: [], pickups: [], bullets: [], parts: [], rings: [], texts: [], splats: [], coinFx: [], cracks: [], booms: [], boss: null,
     shake: 0, contactT: 0, lost: 0, kills: 0, coins: 0, coinsShown: 0, coinPop: 0,
     combo: 0, comboT: 0, comboPop: 0, bestCombo: 0, nextPraise: 0,
     flash: null, punch: 0, slow: 0, endT: 0, banner: null, praise: null, nPop: 0
@@ -277,7 +279,7 @@ function buildLevel(L) {
       ev.push({ at, t: 'gate', a, b });
     } else if (m === 1) {
       if (L >= 3 && i > 1 && Math.random() < 0.3) ev.push({ at, t: 'runners', c: 24 + L * 2 });
-      else ev.push({ at, t: 'horde', i, c: Math.min(240, Math.round(42 + L * 8 + i * 3)), hp: 0.4 + L * 0.15 });
+      else ev.push({ at, t: 'horde', i, c: Math.min(260, Math.round(i < 4 ? 32 + L * 5 : 44 + L * 11 + i * 3.5)), hp: 0.45 + L * (i < 4 ? 0.14 : 0.2) });
     } else if (m === 2) {
       ev.push({ at, t: 'crate', two: Math.random() < 0.45, hp: 18 + L * 14 + i * 3, z: Math.random() < 0.5 ? 18 + L * 4 : 0 });
     } else {
@@ -303,7 +305,7 @@ const SHIRTS = ['#6b2b2b', '#4f3a2a', '#3d4656', '#5a2e4a', '#2f4a3a'];
 function spawnHorde(count, hp, cx, z, maxCols = 16, lock = false, kind = 'mix') {
   const L = S.L, run = kind === 'run';
   // kilitli olmayan büyük sürüler yolu bir kenardan öbürüne kaplar
-  const full = run ? 12 : 21, wall = !lock && count >= full * 2;
+  const full = run ? 13 : 23, wall = !lock && count >= full * 2;
   const cols = wall ? full : clamp(Math.round(Math.sqrt(count * 2.2)), 4, maxCols);
   const sx = wall ? (2 * RW - 0.9) / (full - 1) : run ? 0.8 : 0.5, sz = run ? 0.9 : 0.5, half = (cols - 1) / 2 * sx;
   const lim = Math.max(0, RW - 0.35 - half);
@@ -322,7 +324,7 @@ function spawnHorde(count, hp, cx, z, maxCols = 16, lock = false, kind = 'mix') 
       else if (Math.random() < Math.min(0.08, 0.03 + L * 0.008)) type = 'x';
     }
     const h = hp * ZT[type].hp;
-    S.zombies.push({ g, ox, type, x: g.cx + ox, z: z + r * sz + rnd(-0.05, 0.05), hp: h, max: h, ph: Math.random() * 6, flash: 0, shirt: pick(SHIRTS), sk: pick(ZSKIN), scl: rnd(0.9, 1.12), hair: rint(0, 2), sd: rnd(-1, 1), kb: 0, lag: rnd(1.4, 4.2), wph: r * 0.75 + c * 0.2 + rnd(0, 0.6), sph: rnd(0, 6) });
+    S.zombies.push({ g, ox, type, x: g.cx + ox, z: z + r * sz + rnd(-0.05, 0.05), hp: h, max: h, ph: Math.random() * 6, flash: 0, shirt: pick(SHIRTS), sk: pick(ZSKIN), scl: rnd(0.9, 1.12), hair: rint(0, 2), sd: rnd(-1, 1), kb: 0, lag: rnd(1.4, 4.2), gr: rnd(0.75, 1.25), spd: rnd(0.93, 1.07), stride: rnd(0.8, 1.25), wob: rnd(0.6, 1.4), limp: Math.random() < 0.25 ? rnd(0.5, 1) : 0, armL: Math.random(), armR: Math.random(), dangle: Math.random() < 0.15 ? (Math.random() < 0.5 ? -1 : 1) : 0, hcock: rnd(-0.2, 0.2), lurchT: 0, wph: r * 0.75 + c * 0.2 + rnd(0, 0.6), sph: rnd(0, 6) });
   }
 }
 
@@ -341,7 +343,7 @@ function spawn(ev) {
     // güçlü kapının önünde o şeride kilitli bir sürü bekler
     const r = Math.random(), big = r < 0.25 ? { op: 'mul', v: 3 } : r < 0.55 ? { op: 'mul', v: 2 } : { op: 'add', v: 15 + L * 5 + ev.i };
     pushPair(...bySide(big, { op: 'add', v: rint(2, 4) + L }), Z0 + 12);
-    spawnHorde(20 + L * 7, 0.8 + L * 0.22, side * 2.5, Z0 - 2, 8, true);
+    spawnHorde(20 + L * 7, 0.8 + L * 0.22, side * RW / 2, Z0 - 2, 8, true);
   } else if (ev.t === 'riskMystery') {
     pushPair(...bySide({ op: 'mys', v: 0 }, { op: 'add', v: rint(3, 6) + L }), Z0);
   } else if (ev.t === 'riskWall') {
@@ -349,7 +351,7 @@ function spawn(ev) {
     const big = Math.random() < 0.6 ? { op: 'mul', v: 2 } : { op: 'add', v: 20 + L * 6 };
     pushPair(...bySide(big, gateBad(L)), Z0 + 9);
     const hp = Math.round(Math.max(40 + L * 30, S.n * S.dmg * S.rate * 1.4));
-    S.crates.push({ x: side * 2.5, z: Z0, hp, max: hp, r: pickReward(), gun: pick(GUNS), men: 4 + L * 2 + rint(0, 4), flash: 0, wall: true, hurt: 6 + L * 2 });
+    S.crates.push({ x: side * LANE, z: Z0, hp, max: hp, r: pickReward(), gun: pick(GUNS), men: 4 + L * 2 + rint(0, 4), flash: 0, wall: true, hurt: 6 + L * 2 });
   } else if (ev.t === 'horde') {
     spawnHorde(ev.c, ev.hp, null, Z0, 16, false, ev.i < 4 ? 'easy' : 'mix');
   } else if (ev.t === 'runners') {
@@ -360,7 +362,7 @@ function spawn(ev) {
     for (const s of sides) {
       const r = pickReward();
       const hp = Math.round(ev.hp * rnd(0.8, 1.25));
-      S.crates.push({ x: s * 2.5, z: Z0, hp, max: hp, r, gun: pick(GUNS), men: 4 + L * 2 + rint(0, 4), flash: 0 });
+      S.crates.push({ x: s * LANE, z: Z0, hp, max: hp, r, gun: pick(GUNS), men: 4 + L * 2 + rint(0, 4), flash: 0 });
     }
     if (ev.z) spawnHorde(ev.z, 0.6 + L * 0.18, null, Z0 + 6, 10);
   } else if (ev.t === 'boss') {
@@ -393,7 +395,7 @@ window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 stage.addEventListener('pointerdown', e => { if (e.target !== cv) return; initAudio(); drag = { x: e.clientX }; cv.setPointerCapture(e.pointerId); });
 stage.addEventListener('pointermove', e => {
   if (!drag || !S) return;
-  S.tx += (e.clientX - drag.x) / cssScale / 48 * 1.15; drag.x = e.clientX;
+  S.tx += (e.clientX - drag.x) / cssScale / 44 * 1.15; drag.x = e.clientX;
 });
 const endDrag = () => { drag = null; };
 stage.addEventListener('pointerup', endDrag); stage.addEventListener('pointercancel', endDrag);
@@ -457,9 +459,11 @@ const COIN_X = W - 70, COIN_Y = 100;
 
 function killSoldiers(k, x, z) {
   k = Math.min(k, S.n); if (k <= 0) return;
+  const before = S.n;
   S.n -= k; S.lost += k;
   const p = P(x, z); burst(p.x, p.y - 20, '#5aa8ff', 4 + Math.min(20, k * 2), 160);
   SFX.hurt();
+  if (before > 5 && S.n > 0 && S.n <= 5) buzz([40, 60, 40], 3, 'warning'); // ordu tükenmek üzere
 }
 
 const zWeight = zb => zb.type === 'g' ? 6 + S.L : zb.type === 'x' ? 4 + S.L : 1;
@@ -561,17 +565,21 @@ function update(dt) {
   S.groups = S.groups.filter(g => g.left > 0);
   for (const zb of S.zombies) {
     // sıralar dalga dalga hızlanıp yavaşlar, her zombi kendi gecikmesiyle yön değiştirir
-    zb.z -= mv + zb.g.sp * (1 + 0.32 * Math.sin(S.t * 1.15 + zb.wph)) * dt; zb.ph += dt * 9; zb.flash = Math.max(0, zb.flash - dt * 6);
+    // her zombi kendi hızında, kendi adımıyla yürür; ara sıra öne doğru sendeler
+    if (zb.lurchT > 0) zb.lurchT -= dt; else if (Math.random() < dt * 0.25) zb.lurchT = rnd(0.25, 0.5);
+    const lur = zb.lurchT > 0 ? 1.45 : 1;
+    zb.z -= mv + zb.g.sp * (1 + 0.32 * Math.sin(S.t * 1.15 + zb.wph)) * (zb.spd || 1) * lur * dt;
+    zb.ph += dt * 9 * (zb.gr || 1) * (lur > 1 ? 1.4 : 1); zb.flash = Math.max(0, zb.flash - dt * 6);
     zb.kb = Math.max(0, zb.kb - dt * 3);
     let hx = zb.g.cx + zb.ox, lg = zb.lag;
-    if (!zb.g.lock && zb.z < 16) { const t = clamp((16 - zb.z) / 11, 0, 1), e = t * t * (3 - 2 * t); hx += (S.px + zb.ox / RW * (R + 0.9) - hx) * e; lg = Math.max(lg, 2 + e * 5); }
-    zb.x += (hx + Math.sin(S.t * 1.6 + zb.sph) * 0.14 - zb.x) * Math.min(1, dt * lg);
+    if (!zb.g.lock && zb.z < 22) { const t = clamp((22 - zb.z) / 15, 0, 1), e = t * t * (3 - 2 * t); hx += (S.px + zb.ox / RW * (R + 0.9) - hx) * e; lg = Math.max(lg, 2 + e * 5); }
+    zb.x += (hx + Math.sin(S.t * 1.6 + zb.sph) * 0.14 + Math.sin(S.t * 0.7 + zb.wph * 1.3) * 0.12 - zb.x) * Math.min(1, dt * lg);
     if (zb.fuse !== undefined && !zb.dead && (zb.fuse -= dt) <= 0) zombieDie(zb);
   }
   const B = S.boss;
   if (B) {
     B.flash = Math.max(0, B.flash - dt * 5);
-    if (!B.sized && B.z <= RANGE) { B.sized = true; B.hp = B.max = Math.round(Math.max(B.max, S.n * S.dmg * S.rate * (S.weapon === 'shotgun' ? 1 : WEAPONS[S.weapon].dmg) * rnd(8.8, 10)) * (B.king ? 0.85 : 1)); }
+    if (!B.sized && B.z <= RANGE) { B.sized = true; B.hp = B.max = Math.round(Math.max(B.max, S.n * S.dmg * S.rate * (S.weapon === 'shotgun' ? 1 : WEAPONS[S.weapon].dmg) * rnd(10.5, 12)) * (B.king ? 0.9 : 1)); }
     if (!B.enraged && B.sized && B.hp < B.max * 0.5) {
       B.enraged = true; S.banner = { txt: B.name + ' ÖFKELENDİ!', life: 1.8 };
       SFX.roar(); addShake(10); punch(1);
@@ -617,7 +625,7 @@ function update(dt) {
     if (bl.z > bl.range || Math.abs(bl.x) > RW + 0.6) { bl.dead = true; continue; }
     let hit = null, hz = 1e9, kind = '';
     for (const g of S.gates) if (!g.done && g.op === 'add' && g.z > z0 - 0.3 && g.z <= z1 && Math.sign(bl.x || 1) === g.side && g.z < hz) { hit = g; hz = g.z; kind = 'g'; }
-    for (const c of S.crates) if (c.z > z0 - 0.6 && c.z <= z1 + 0.3 && Math.abs(bl.x - c.x) < 1.05 && c.z < hz) { hit = c; hz = c.z; kind = 'c'; }
+    for (const c of S.crates) if (c.z > z0 - 0.6 && c.z <= z1 + 0.3 && Math.abs(bl.x - c.x) < 1.15 && c.z < hz) { hit = c; hz = c.z; kind = 'c'; }
     for (const zb of S.zombies) if (!zb.dead && zb !== bl.last && zb.z > z0 - 0.6 && zb.z <= z1 + 0.2 && Math.abs(bl.x - zb.x) < ZT[zb.type].hw && zb.z < hz) { hit = zb; hz = zb.z; kind = 'z'; }
     if (B && B.z > z0 - 1 && B.z <= z1 + 0.5 && Math.abs(bl.x - B.x) < 1.9 && B.z < hz) { hit = B; hz = B.z; kind = 'b'; }
     if (!hit) continue;
@@ -688,6 +696,17 @@ function update(dt) {
     if (c.z < -4) c.dead = true;
   }
   S.crates = S.crates.filter(c => !c.dead);
+
+  // yere düşen silahlar: üstünden geçen alır, istemeyen yanından geçer
+  for (const k of S.pickups) {
+    k.z -= mv; k.t += dt;
+    if (!k.taken && k.z <= SQ_Z + 0.5 && k.z > SQ_Z - 1.5 && Math.abs(k.x - S.px) < R * 0.55 + 0.6) {
+      k.taken = true; S.weapon = k.gun;
+      S.praise = { txt: 'YENİ SİLAH: ' + WEAPONS[k.gun].name, life: 1.6 }; SFX.praise(); punch(0.3);
+      const q = P(k.x, SQ_Z); ring(q.x, q.y - 20, 'rgba(197,139,255,.95)', 10, 160, 0.4, 8);
+    }
+  }
+  S.pickups = S.pickups.filter(k => !k.taken && k.z > -4);
 
   // kapılar
   for (const g of S.gates) {
@@ -787,7 +806,7 @@ function breakCrate(c) {
   addShake(7); punch(0.45); explode(p.x, y, u, 1.3); SFX.crate();
   if (c.r.k === 'dmg') { S.dmg = +(S.dmg * 1.35).toFixed(2); floatText(p.x, y - 40, 'HASAR ×1.35', c.r.col, 34, 1.4); }
   else if (c.r.k === 'rate') { S.rate = +(S.rate * 1.22).toFixed(2); floatText(p.x, y - 40, 'ATIŞ HIZI +%22', c.r.col, 34, 1.4); }
-  else if (c.r.k === 'gun') { S.weapon = c.gun; S.praise = { txt: 'YENİ SİLAH: ' + WEAPONS[c.gun].name, life: 1.6 }; SFX.praise(); }
+  else if (c.r.k === 'gun') { S.pickups.push({ x: c.x, z: c.z, gun: c.gun, t: 0 }); floatText(p.x, y - 40, 'SİLAH DÜŞTÜ', c.r.col, 30, 1.2); }
   else { S.n = Math.min(9999, S.n + c.men); S.nPop = 1; floatText(p.x, y - 40, '+' + c.men + ' ASKER', c.r.col, 34, 1.4); }
   coinFly(p.x, y, 5);
 }
@@ -1131,22 +1150,30 @@ function drawZombie(zb) {
   const skinD = T === 'x' ? '#5f9a2c' : T === 'g' ? '#8f2f2a' : sk[1];
   const shirt = run ? '#d9a514' : T === 'x' ? '#4d6b2a' : T === 'g' ? '#2b2230' : zb.shirt;
   if (u < 9) {
-    // uzaktaki zombiler sade çizilir
+    // uzaktaki zombiler sade çizilir (yine de sallanarak yürür)
+    const fx = Math.sin(zb.ph * 0.5 + (zb.sph || 0)) * u * 0.07, fy = Math.abs(Math.sin(zb.ph)) * u * 0.06;
+    ctx.save(); ctx.translate(fx, -fy);
     ctx.fillStyle = '#3b2a33'; ctx.fillRect(X - u * 0.17, yb - u * 0.34, u * 0.34, u * 0.34);
     ctx.fillStyle = T === 'x' ? skin : T === 'a' ? '#8a94a0' : shirt; ctx.fillRect(X - u * 0.25, yb - u * 0.82, u * 0.5, u * 0.5);
     ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(X, yb - u * 0.96, u * 0.2, 0, Math.PI * 2); ctx.fill();
     if (zb.flash > 0) { ctx.globalAlpha = zb.flash * 0.8; ctx.fillStyle = '#fff'; ctx.fillRect(X - u * 0.25, yb - u * 1.15, u * 0.5, u * 1.15); ctx.globalAlpha = 1; }
+    ctx.restore();
     return;
   }
   shadow(p, 0.3 * Z.sc);
-  const step = Math.sin(zb.ph * (run ? 1.9 : 1)) * u * (run ? 0.12 : 0.07), sq = 1 - zb.flash * 0.12;
+  // yürüyüş: kişisel adım boyu, topallama, yana yalpalama, adımda zıplama, vurulunca sarsılma
+  const gp = zb.ph * (run ? 1.9 : 1), limp = zb.limp || 0;
+  const step = Math.sin(gp) * u * (run ? 0.12 : 0.07) * (zb.stride || 1), sq = 1 - zb.flash * 0.12;
+  const tilt = Math.sin(zb.ph * 0.5 + (zb.sph || 0)) * 0.09 * (zb.wob || 1) + limp * Math.max(0, Math.sin(gp)) * 0.14 + zb.kb * 0.3 * (zb.sd < 0 ? -1 : 1);
+  const bob = Math.abs(Math.sin(gp)) * u * (run ? 0.07 : 0.04) * (1 + limp) + zb.kb * u * 0.06 + (zb.lurchT > 0 ? u * 0.05 : 0);
+  ctx.save(); ctx.translate(X, yb); ctx.rotate(tilt); ctx.translate(-X, -yb - bob);
   const sway = Math.sin(zb.ph * 0.5) * u * 0.04, hipY = yb - u * 0.34;
   const lw = Math.max(1, u * 0.04);
   // bacaklar ve ayaklar
-  limb(X - u * 0.11, hipY, X - u * 0.13, yb - u * 0.07 - Math.max(0, step), u * 0.14, '#3b2a33');
+  limb(X - u * 0.11, hipY, X - u * 0.13 - limp * u * 0.04, yb - u * 0.07 - Math.max(0, step) * (1 - limp * 0.75), u * 0.14, '#3b2a33');
   limb(X + u * 0.11, hipY, X + u * 0.13, yb - u * 0.07 - Math.max(0, -step), u * 0.14, '#3b2a33');
   ctx.fillStyle = '#231a1c';
-  ctx.beginPath(); ctx.ellipse(X - u * 0.13, yb - u * 0.04 - Math.max(0, step), u * 0.1, u * 0.055, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(X - u * 0.13 - limp * u * 0.04, yb - u * 0.04 - Math.max(0, step) * (1 - limp * 0.75), u * 0.1, u * 0.055, 0, 0, Math.PI * 2); ctx.fill();
   ctx.beginPath(); ctx.ellipse(X + u * 0.13, yb - u * 0.04 - Math.max(0, -step), u * 0.1, u * 0.055, 0, 0, Math.PI * 2); ctx.fill();
   // gövde
   const tx = X + sway, th = u * 0.5 * sq, ty = hipY - th;
@@ -1172,15 +1199,19 @@ function drawZombie(zb) {
     ctx.fillStyle = 'rgba(255,255,255,.1)'; ctx.fillRect(tx - u * 0.2, ty + u * 0.05, u * 0.08, th * 0.7);
   }
   // öne uzanan kollar
-  const ab = Math.sin(zb.ph * 0.8) * u * 0.04;
   for (const sx of [-1, 1]) {
-    const hx2 = tx + sx * u * 0.31, hy2 = ty + u * 0.4 + sx * ab;
+    // kollar: biri daha yukarıda, kendi ritminde savrulur; bazılarında bir kol sarkar
+    const up = sx < 0 ? (zb.armL || 0) : (zb.armR || 0), sw = Math.sin(zb.ph * 0.8 + sx * 1.7 + (zb.sph || 0));
+    let hx2 = tx + sx * u * (0.31 + 0.04 * sw), hy2 = ty + u * (0.4 - 0.2 * up) + sw * u * 0.07;
+    if (zb.dangle === sx) { hx2 = tx + sx * u * (0.29 + 0.03 * Math.sin(gp)); hy2 = ty + th + u * 0.1 + Math.sin(gp + 1) * u * 0.04; }
     limb(tx + sx * u * 0.24, ty + u * 0.1, hx2, hy2, u * 0.11, skin);
     ctx.fillStyle = skin; ctx.strokeStyle = OUT; ctx.lineWidth = lw;
     ctx.beginPath(); ctx.arc(hx2, hy2, u * 0.075, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   }
   // kafa
   const hx = tx + sway * 0.6, hy = ty - u * 0.14 * sq;
+  // kafa yana düşük durur ve sallanır
+  ctx.save(); ctx.translate(hx, hy + u * 0.15); ctx.rotate((zb.hcock || 0) + Math.sin(zb.ph * 0.37 + (zb.sph || 0)) * 0.12); ctx.translate(-hx, -hy - u * 0.15);
   ctx.fillStyle = skin; ctx.strokeStyle = OUT; ctx.lineWidth = lw;
   roundRect(hx - u * 0.19, hy - u * 0.2, u * 0.38, u * 0.38, u * 0.15); ctx.fill(); ctx.stroke();
   ctx.fillStyle = skinD; roundRect(hx - u * 0.16, hy + u * 0.03, u * 0.32, u * 0.13, u * 0.06); ctx.fill();
@@ -1199,13 +1230,17 @@ function drawZombie(zb) {
     else if (zb.hair === 2) { ctx.fillStyle = '#3a2a22'; ctx.fillRect(hx - u * 0.19, hy - u * 0.2, u * 0.13, u * 0.09); ctx.fillRect(hx + u * 0.04, hy - u * 0.22, u * 0.1, u * 0.06); }
   }
   if (run) { ctx.fillStyle = '#ffffff'; ctx.fillRect(hx - u * 0.19, hy - u * 0.15, u * 0.38, u * 0.05); }
+  if (T === 'a') {
+    ctx.fillStyle = '#9aa3ad'; ctx.strokeStyle = OUT;
+    ctx.beginPath(); ctx.arc(hx, hy - u * 0.06, u * 0.215, Math.PI, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
   if (T === 'g') {
     ctx.fillStyle = '#4a4050'; ctx.strokeStyle = OUT;
     for (const sx of [-1, 1]) { ctx.beginPath(); ctx.arc(tx + sx * u * 0.26, ty + u * 0.06, u * 0.1, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
   }
   if (T === 'a') {
-    ctx.fillStyle = '#9aa3ad'; ctx.strokeStyle = OUT;
-    ctx.beginPath(); ctx.arc(hx, hy - u * 0.06, u * 0.215, Math.PI, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = OUT;
     ctx.fillStyle = '#7f8a96';
     roundRect(tx - u * 0.3, ty + u * 0.02, u * 0.6, th + u * 0.06, u * 0.08); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#c9d1da';
@@ -1216,6 +1251,7 @@ function drawZombie(zb) {
     ctx.globalAlpha = zb.flash * 0.85; ctx.fillStyle = '#fff';
     roundRect(tx - u * 0.3, hy - u * 0.22, u * 0.6, yb - hy + u * 0.1, u * 0.15); ctx.fill(); ctx.globalAlpha = 1;
   }
+  ctx.restore();
 }
 
 function hexMix(a, b, t) {
@@ -1399,7 +1435,7 @@ function drawGate(g) {
 }
 
 function drawCrate(c) {
-  const p = P(c.x, c.z), u = p.u, s = 1.8 * u;
+  const p = P(c.x, c.z), u = p.u, s = 2 * u;
   shadow(p, 1.1);
   const jx = c.flash * rnd(-1, 1) * u * 0.06, jy = c.flash * rnd(-1, 1) * u * 0.04;
   const x = p.x - s / 2 + jx, y = p.y - s + jy, d = s * 0.14;
@@ -1424,16 +1460,6 @@ function drawCrate(c) {
   // hp çubuğu
   ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(x + s * 0.15, y - d - u * 0.2, s * 0.7, u * 0.08);
   ctx.fillStyle = '#5ef0a0'; ctx.fillRect(x + s * 0.15, y - d - u * 0.2, s * 0.7 * Math.max(0, c.hp / c.max), u * 0.08);
-  // ödül etiketi
-  const lbl = c.r.k === 'men' ? '+' + c.men + ' ASKER' : c.r.k === 'gun' ? WEAPONS[c.gun].name : c.r.label;
-  const fs = Math.max(8, u * 0.3);
-  ctx.font = `${fs}px ${FONT}`;
-  const tw = ctx.measureText(lbl).width + fs;
-  const ly = y - d - u * 0.35 - fs * 1.5 + Math.sin(S.t * 5) * u * 0.05;
-  ctx.fillStyle = c.r.col; roundRect(p.x - tw / 2, ly, tw, fs * 1.4, fs * 0.4); ctx.fill();
-  ctx.strokeStyle = OUT; ctx.lineWidth = 2; ctx.stroke();
-  ctx.fillStyle = '#1a1a1a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(lbl, p.x, ly + fs * 0.72);
 }
 
 function drawBullets() {
@@ -1608,6 +1634,48 @@ function drawBanners() {
 }
 
 // her sürünün üstünde kalan gücü: orduya değerse bu kadar asker götürür
+function drawCrateLabels() {
+  if (S.state !== 'play') return;
+  for (const c of S.crates) {
+    if (c.z > 88 || c.z < -1) continue;
+    const p = P(c.x, c.z), u = p.u, s = 2 * u, d = s * 0.14, y = p.y - s;
+    const lbl = c.r.k === 'men' ? '+' + c.men + ' ASKER' : c.r.k === 'gun' ? WEAPONS[c.gun].name : c.r.label;
+    const fs = clamp(u * 0.36, 11, 22);
+    ctx.font = `${fs}px ${FONT}`;
+    const tw = ctx.measureText(lbl).width + fs;
+    const ly = y - d - u * 0.35 - fs * 1.5 + Math.sin(S.t * 5) * u * 0.05;
+    ctx.globalAlpha = clamp((88 - c.z) / 10, 0, 1);
+    ctx.fillStyle = c.r.col; roundRect(p.x - tw / 2, ly, tw, fs * 1.4, fs * 0.4); ctx.fill();
+    ctx.strokeStyle = OUT; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#1a1a1a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(lbl, p.x, ly + fs * 0.72);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawPickup(k) {
+  const p = P(k.x, k.z), u = p.u, bob = Math.sin(k.t * 4) * u * 0.12, y = p.y - u * 0.9 + bob;
+  shadow(p, 0.7);
+  glowDot(gctx, p.x, y, u * 1.6, '197,139,255', 0.8);
+  ctx.save(); ctx.translate(p.x, y); ctx.rotate(Math.sin(k.t * 2.2) * 0.15);
+  ctx.fillStyle = '#7a3fd1'; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(2, u * 0.06);
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2 + Math.PI / 6; ctx.lineTo(Math.cos(a) * u * 0.7, Math.sin(a) * u * 0.7); }
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  // silah simgesi
+  ctx.fillStyle = '#ffffff';
+  roundRect(-u * 0.42, -u * 0.12, u * 0.72, u * 0.2, u * 0.05); ctx.fill();
+  roundRect(-u * 0.3, -u * 0.02, u * 0.16, u * 0.32, u * 0.04); ctx.fill();
+  ctx.fillRect(u * 0.28, -u * 0.08, u * 0.16, u * 0.08);
+  ctx.restore();
+  const fs = clamp(u * 0.34, 11, 20), lbl = WEAPONS[k.gun].name;
+  ctx.font = `${fs}px ${FONT}`; const tw = ctx.measureText(lbl).width + fs;
+  ctx.fillStyle = '#c58bff'; roundRect(p.x - tw / 2, y - u * 0.75 - fs * 1.5, tw, fs * 1.4, fs * 0.4); ctx.fill();
+  ctx.strokeStyle = OUT; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = '#1a1a1a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(lbl, p.x, y - u * 0.75 - fs * 0.78);
+}
+
 function drawHordeBadges() {
   if (S.state !== 'play') return;
   for (const g of S.groups) { g.bw = 0; g.bx = 0; g.bz = 0; g.bn = 0; g.bf = 1e9; }
@@ -1646,6 +1714,7 @@ function render() {
   const list = [];
   for (const g of S.gates) if (!g.done) list.push({ z: g.z + 0.01, f: () => drawGate(g) });
   for (const c of S.crates) list.push({ z: c.z, f: () => drawCrate(c) });
+  for (const k of S.pickups) list.push({ z: k.z, f: () => drawPickup(k) });
   for (const zb of S.zombies) list.push({ z: zb.z, f: () => drawZombie(zb) });
   if (S.boss) list.push({ z: S.boss.z, f: () => drawBoss(S.boss) });
   const vn = S.state === 'ending' || S.state === 'play' || S.state === 'menu' ? visN() : 0;
@@ -1653,6 +1722,7 @@ function render() {
   list.sort((a, b) => b.z - a.z);
   for (const it of list) if (it.z < 110) it.f();
   drawHordeBadges();
+  drawCrateLabels();
   drawBullets();
   drawFx();
   drawAmbient();
@@ -1696,10 +1766,12 @@ function winLevel() {
   S.coins = S.coinsShown + S.coinFx.length; S.coinsShown = S.coins; S.coinFx = [];
   if (S.L + 1 > best) { best = S.L + 1; try { localStorage.setItem('sayiOrdusuBest', best); } catch (e) {} }
   META.gold += S.coins; saveMeta();
+  buzz([30, 70, 60], 2, 'success');
   $('winBig').textContent = `+${S.coins} ALTIN`;
   $('winTxt').textContent = `${S.kills} zombi yok edildi, en uzun kombo ×${S.bestCombo}, sağ kalan asker ${S.n}. Sıradaki bölümde sürüler daha kalabalık, boss daha dayanıklı.`;
   show('win');
 }
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('button'); if (b && b !== vibBtn && !b.disabled) buzz(10, 0, 'select'); });
 $('startBtn').onclick = () => start(Math.max(1, best));
 $('retryBtn').onclick = () => start(S.L);
 $('nextBtn').onclick = () => start(S.L + 1);
@@ -1707,12 +1779,12 @@ setBest();
 
 // ---------- dükkân ----------
 const UPG = [
-  { k: 'men', name: 'Başlangıç Ordusu', desc: l => '+' + l * 2 + ' asker', base: 160, max: 10 },
-  { k: 'dmg', name: 'Hasar', desc: l => '+%' + l * 10, base: 240, max: 10 },
-  { k: 'rate', name: 'Atış Hızı', desc: l => '+%' + l * 6, base: 240, max: 10 },
-  { k: 'crit', name: 'Kritik Şansı', desc: l => '%' + (10 + l * 2), base: 320, max: 10 }
+  { k: 'men', name: 'Başlangıç Ordusu', desc: l => '+' + l + ' asker', base: 180, max: 10 },
+  { k: 'dmg', name: 'Hasar', desc: l => '+%' + l * 6, base: 260, max: 10 },
+  { k: 'rate', name: 'Atış Hızı', desc: l => '+%' + l * 4, base: 260, max: 10 },
+  { k: 'crit', name: 'Kritik Şansı', desc: l => '%' + String(10 + l * 1.5).replace('.', ','), base: 340, max: 10 }
 ];
-const upCost = u => Math.round(u.base * Math.pow(1.55, META.up[u.k]));
+const upCost = u => Math.round(u.base * Math.pow(1.7, META.up[u.k]));
 let shopBack = 'menu';
 function renderShop() {
   $('shopGold').textContent = META.gold + ' ALTIN';
